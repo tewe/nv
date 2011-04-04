@@ -30,6 +30,7 @@
 #import "NSFileManager_NV.h"
 #import "EncodingsManager.h"
 #import "ExporterManager.h"
+#import "ExternalEditorListController.h"
 #import "NSData_transformations.h"
 #import "BufferUtils.h"
 #import "LinkingEditor.h"
@@ -313,13 +314,9 @@ terminateApp:
 	
     if (newNotation) {
 		if (notationController) {
-			[notationController endDeletionManagerIfNecessary];
-			[notationController stopSyncServices];
+			[notationController closeAllResources];
 			[[NSNotificationCenter defaultCenter] removeObserver:self name:SyncSessionsChangedVisibleStatusNotification 
 														  object:[notationController syncSessionController]];
-			[notationController stopFileNotifications];
-			if ([notationController flushAllNoteChanges])
-				[notationController closeJournal];
 		}
 		
 		NotationController *oldNotation = notationController;
@@ -358,6 +355,8 @@ terminateApp:
 		[[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(syncSessionsChangedVisibleStatus:) 
 													 name:SyncSessionsChangedVisibleStatusNotification 
 												   object:[notationController syncSessionController]]; 
+		
+		//these should probably be triggered from within NotationController:
 		[notationController performSelector:@selector(startSyncServices) withObject:nil afterDelay:0.0];
 		
 		if ([[notationController notationPrefs] secureTextEntry]) {
@@ -417,18 +416,14 @@ terminateApp:
 	} else if (selector == @selector(fixFileEncoding:)) {
 		
 		return (currentNote != nil && storageFormatOfNote(currentNote) == PlainTextFormat && ![currentNote contentsWere7Bit]);
+	} else if (selector == @selector(editNoteExternally:)) {
+		
+		return (numberSelected > 0) && [[menuItem representedObject] canEditAllNotes:
+										[notationController notesAtIndexes:[notesTableView selectedRowIndexes]]];
 	}
 	
 	return YES;
 }
-
-/*
- - (void)menuNeedsUpdate:(NSMenu *)menu {
- NSLog(@"mama needs update: %@", [menu title]);
- 
- NSArray *selectedNotes = [notationController notesAtIndexes:[notesTableView selectedRowIndexes]];
- [selectedNotes setURLsInNotesForMenu:menu];
- }*/
 
 - (void)updateNoteMenus {
 	NSMenu *notesMenu = [[[NSApp mainMenu] itemWithTag:NOTES_MENU_ID] submenu];
@@ -440,6 +435,8 @@ terminateApp:
 		[deleteItem setTitle:[NSString stringWithFormat:@"%@%@", 
 							  NSLocalizedString(@"Delete", nil), trailingQualifier]];
 	}
+	
+	[notesMenu setSubmenu:[[ExternalEditorListController sharedInstance] addEditNotesMenu] forItem:[notesMenu itemWithTag:88]];
 	
 	NSMenu *viewMenu = [[[NSApp mainMenu] itemWithTag:VIEW_MENU_ID] submenu];
 	
@@ -594,6 +591,24 @@ terminateApp:
 	[[NSWorkspace sharedWorkspace] selectFile:path inFileViewerRootedAtPath:@""];
 }
 
+- (IBAction)editNoteExternally:(id)sender {
+	ExternalEditor *ed = [sender representedObject];
+	if ([ed isKindOfClass:[ExternalEditor class]]) {
+		NSIndexSet *indexes = [notesTableView selectedRowIndexes];
+
+		if (kCGEventFlagMaskAlternate == (CGEventSourceFlagsState(kCGEventSourceStateCombinedSessionState) & NSDeviceIndependentModifierFlagsMask)) {
+			//allow changing the default editor directly from Notes menu
+			[[ExternalEditorListController sharedInstance] setDefaultEditor:ed];
+		}
+		//force-write any queued changes to disk in case notes are being stored as separate files which might be opened directly by the method below
+		[notationController synchronizeNoteChanges:nil];
+		
+		[[notationController notesAtIndexes:indexes] makeObjectsPerformSelector:@selector(editExternallyUsingEditor:) withObject:ed];
+	} else {
+		NSBeep();
+	}
+}
+
 - (IBAction)printNote:(id)sender {
 	NSIndexSet *indexes = [notesTableView selectedRowIndexes];
 	
@@ -682,7 +697,7 @@ terminateApp:
 		
 		ResetFontRelatedTableAttributes();
 		[notesTableView updateTitleDereferencorState];
-		[notationController invalidateAllLabelPreviewImages];
+		[[notationController labelsListDataSource] invalidateCachedLabelImages];
 		[self _forceRegeneratePreviewsForTitleColumn];
 				
 		if ([selectorString isEqualToString:SEL_STR(setTableColumnsShowPreview:sender:)]) [self updateNoteMenus];

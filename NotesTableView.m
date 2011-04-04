@@ -19,6 +19,7 @@
 #import "AppController_Importing.h"
 #import "FastListDataSource.h"
 #import "NoteAttributeColumn.h"
+#import "ExternalEditorListController.h"
 #import "GlobalPrefs.h"
 #import "NotationPrefs.h"
 #import "NoteObject.h"
@@ -34,7 +35,7 @@
 
 #define SYNTHETIC_TAGS_COLUMN_INDEX 200
 
-static void _CopyItemWithSelectorFromMenu(NSMenu *destMenu, NSMenu *sourceMenu, SEL aSel, id target);
+static void _CopyItemWithSelectorFromMenu(NSMenu *destMenu, NSMenu *sourceMenu, SEL aSel, id target, NSInteger tag);
 
 @implementation NotesTableView
 
@@ -306,22 +307,23 @@ static void _CopyItemWithSelectorFromMenu(NSMenu *destMenu, NSMenu *sourceMenu, 
 	NSUInteger i;
 	for (i=0; i<[allColumns count]; i++) {
 		[[[allColumns objectAtIndex:i] dataCell] setFont:font];
-	}	
+	}
+	BOOL isOneRow = !horiz || (![globalPrefs tableColumnsShowPreview] && !ColumnIsSet(NoteLabelsColumn, [globalPrefs tableColumnsBitmap]));
 	
 	if (IsLeopardOrLater)
-		[self setSelectionHighlightStyle:horiz ? NSTableViewSelectionHighlightStyleSourceList : NSTableViewSelectionHighlightStyleRegular];
+		[self setSelectionHighlightStyle:isOneRow ? NSTableViewSelectionHighlightStyleRegular : NSTableViewSelectionHighlightStyleSourceList];
 	[self setBackgroundColor: horiz ? [NSColor colorWithCalibratedWhite:0.98 alpha:1.0] : [NSColor whiteColor]];
 	
 	NSLayoutManager *lm = [[NSLayoutManager alloc] init];
 	tableFontHeight = [lm defaultLineHeightForFont:font];
-	float h[4] = {(tableFontHeight * 3.0 + 5.0f), (tableFontHeight * 2.0 + 6.0f), (tableFontHeight + 4.0f), tableFontHeight + 2.0f};
+	float h[4] = {(tableFontHeight * 3.0 + 5.0f), (tableFontHeight * 2.0 + 6.0f), (tableFontHeight + 2.0f), tableFontHeight + 2.0f};
 	[self setRowHeight: horiz ? ([globalPrefs tableColumnsShowPreview] ? h[0] : 
 								 (ColumnIsSet(NoteLabelsColumn,[globalPrefs tableColumnsBitmap]) ? h[1] : h[2])) : h[3]];
 	[lm release];
 	
 	[self setIntercellSpacing:NSMakeSize(12, 2)];
 	
-	[self setGridStyleMask:horiz ? NSTableViewSolidHorizontalGridLineMask : NSTableViewGridNone];
+	[self setGridStyleMask:isOneRow ? NSTableViewGridNone : NSTableViewSolidHorizontalGridLineMask];
 	[self setGridColor:[NSColor colorWithCalibratedWhite:0.882 alpha:1.0]];
 }
 
@@ -658,18 +660,20 @@ static void _CopyItemWithSelectorFromMenu(NSMenu *destMenu, NSMenu *sourceMenu, 
 	return [self defaultNoteCommandsMenuWithTarget:[NSApp delegate]];
 }
 
-static void _CopyItemWithSelectorFromMenu(NSMenu *destMenu, NSMenu *sourceMenu, SEL aSel, id target) {
-	int menuIndex = [sourceMenu indexOfItemWithTarget:target andAction:aSel];
-	if (menuIndex > -1)	[destMenu addItem:[[(NSMenuItem*)[sourceMenu itemAtIndex:menuIndex] copy] autorelease]];
+static void _CopyItemWithSelectorFromMenu(NSMenu *destMenu, NSMenu *sourceMenu, SEL aSel, id target, NSInteger tag) {
+	NSInteger idx = [sourceMenu indexOfItemWithTag:tag];
+	if (idx > -1 || (idx = [sourceMenu indexOfItemWithTarget:target andAction:aSel]) > -1) {
+		[destMenu addItem:[[(NSMenuItem*)[sourceMenu itemAtIndex:idx] copy] autorelease]];
+	}
 }
 
 - (NSMenu *)defaultNoteCommandsMenuWithTarget:(id)target {
 	NSMenu *theMenu = [[[NSMenu alloc] initWithTitle:@"Contextual Note Commands Menu"] autorelease];
 	NSMenu *notesMenu = [[[NSApp mainMenu] itemWithTag:NOTES_MENU_ID] submenu];
 	
-	_CopyItemWithSelectorFromMenu(theMenu, notesMenu, @selector(renameNote:), target);
-	_CopyItemWithSelectorFromMenu(theMenu, notesMenu, @selector(tagNote:), target);
-	_CopyItemWithSelectorFromMenu(theMenu, notesMenu, @selector(deleteNote:), target);
+	_CopyItemWithSelectorFromMenu(theMenu, notesMenu, @selector(renameNote:), target, -1);
+	_CopyItemWithSelectorFromMenu(theMenu, notesMenu, @selector(tagNote:), target, -1);
+	_CopyItemWithSelectorFromMenu(theMenu, notesMenu, @selector(deleteNote:), target, -1);
 	
 	[theMenu addItem:[NSMenuItem separatorItem]];
 	
@@ -679,12 +683,15 @@ static void _CopyItemWithSelectorFromMenu(NSMenu *destMenu, NSMenu *sourceMenu, 
 	[noteLinkItem setTarget:target];
 	[theMenu addItem:[noteLinkItem autorelease]];
 
-	_CopyItemWithSelectorFromMenu(theMenu, notesMenu, @selector(exportNote:), target);
-	_CopyItemWithSelectorFromMenu(theMenu, notesMenu, @selector(revealNote:), target);
+	_CopyItemWithSelectorFromMenu(theMenu, notesMenu, @selector(exportNote:), target, -1);
+	_CopyItemWithSelectorFromMenu(theMenu, notesMenu, @selector(revealNote:), target, -1);
+	_CopyItemWithSelectorFromMenu(theMenu, notesMenu, NULL, target, 88);
+	
+	[theMenu setSubmenu:[[ExternalEditorListController sharedInstance] addEditNotesMenu] forItem:[theMenu itemAtIndex:[theMenu numberOfItems] - 1]];
 	
 	[theMenu addItem:[NSMenuItem separatorItem]];
 	
-	_CopyItemWithSelectorFromMenu(theMenu, notesMenu, @selector(printNote:), target);
+	_CopyItemWithSelectorFromMenu(theMenu, notesMenu, @selector(printNote:), target, -1);
 	
 	NSArray *notes = [(FastListDataSource*)[self dataSource] objectsAtFilteredIndexes:[self selectedRowIndexes]];
 	[notes addMenuItemsForURLsInNotes:theMenu];
@@ -973,7 +980,7 @@ enum { kNext_Tag = 'j', kPrev_Tag = 'k' };
 		}
 	} else if (command == @selector(insertTab:)) {
 		
-		if ([globalPrefs horizontalLayout] && !lastEventActivatedTagEdit) {
+		if ([globalPrefs horizontalLayout] && !lastEventActivatedTagEdit && ColumnIsSet(NoteLabelsColumn, [globalPrefs tableColumnsBitmap])) {
 			//if we're currently renaming a note in horizontal mode, then tab should move focus to tags area
 			
 			[self editRowAtColumnWithIdentifier:NoteLabelsColumnString];
@@ -1051,7 +1058,7 @@ enum { kNext_Tag = 'j', kPrev_Tag = 'k' };
 		
 		//mouse is inside this column's row's cell's tags frame
 		UnifiedCell *cell = [[[self tableColumns] objectAtIndex:columnIndex] dataCellForRow:rowIndex];
-		NSRect tagCellRect = [cell nv_tagsRectForFrame:[self frameOfCellAtColumn:columnIndex row:rowIndex] andImage:nil];
+		NSRect tagCellRect = [cell nv_tagsRectForFrame:[self frameOfCellAtColumn:columnIndex row:rowIndex]];
 		
 		return [self mouse:p inRect:tagCellRect];
 		

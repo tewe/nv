@@ -19,9 +19,11 @@
 #import "PTKeyComboPanel.h"
 #import "PTKeyCombo.h"
 #import "NotationPrefsViewController.h"
+#import "ExternalEditorListController.h"
 #import "NSData_transformations.h"
 #import "NSString_NV.h"
 #import "NSFileManager_NV.h"
+#import "NSBezierPath_NV.h"
 #import "NotationPrefs.h"
 #import "GlobalPrefs.h"
 
@@ -191,6 +193,19 @@
 	[prefsController setTabIndenting:[[tabKeyRadioMatrix cellAtRow:0 column:0] state] sender:self];
 }
 
+- (IBAction)changedExternalEditorsMenu:(id)sender {
+	//not currently called as an action in practice
+	[self _selectDefaultExternalEditor];
+}
+
+- (void)_selectDefaultExternalEditor {
+	ExternalEditor *ed = [[ExternalEditorListController sharedInstance] defaultExternalEditor];
+	NSInteger idx = ed ? [externalEditorMenuButton indexOfItemWithRepresentedObject:ed] : 0;
+	if (idx > -1) {
+		[externalEditorMenuButton selectItemAtIndex:idx];
+	}
+}
+
 - (IBAction)changedTableText:(id)sender {
 	if (sender == tableTextMenuButton) {
 		if ([tableTextSizeField selectedTag] != 3) [tableTextSizeField setFloatValue:[prefsController tableFontSize]];
@@ -242,7 +257,9 @@
     if (!name)
 		name = NSLocalizedString(@"<Directory unknown>", nil);
 	
-    NSImage *iconImage = [prefsController iconForDefaultDirectoryWithFSRef:&targetRef];
+	NSImage *iconImage = nil;
+	if (!IsZeros(&targetRef, sizeof(FSRef)) || [[prefsController aliasDataForDefaultDirectory] fsRefAsAlias:&targetRef])
+		iconImage = [NSImage smallIconForFSRef:&targetRef];
 	
     NSMenuItem *theMenuItem = [[[NSMenuItem alloc] initWithTitle:name action:nil keyEquivalent:@""] autorelease];
     
@@ -384,6 +401,11 @@
     [tableTextSizeField setFloatValue:fontSize];
     [tableTextSizeField setHidden:(fontButtonIndex != 3)];
     
+	[externalEditorMenuButton setMenu:[[ExternalEditorListController sharedInstance] addEditorPrefsMenu]];
+	[self _selectDefaultExternalEditor];
+	[[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(changedExternalEditorsMenu:) 
+												 name:ExternalEditorsChangedNotification object:nil];
+	
     [completeNoteTitlesButton setState:[prefsController autoCompleteSearches]];
     [checkSpellingButton setState:[prefsController checkSpellingAsYouType]];
     [confirmDeletionButton setState:[prefsController confirmNoteDeletion]];

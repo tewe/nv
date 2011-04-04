@@ -142,7 +142,7 @@ typedef struct _NoteCatalogEntry {
 - (NSUndoManager*)undoManager;
 - (void)noteDidNotWrite:(NoteObject*)note errorCode:(OSStatus)error;
 - (void)scheduleWriteForNote:(NoteObject*)note;
-- (void)endDeletionManagerIfNecessary;
+- (void)closeAllResources;
 - (void)trashRemainingNoteFilesInDirectory;
 - (void)checkIfNotationIsTrashed;
 - (void)updateLinksToNote:(NoteObject*)aNoteObject fromOldName:(NSString*)oldname;
@@ -188,7 +188,6 @@ typedef struct _NoteCatalogEntry {
 - (float)titleColumnWidth;
 - (void)regeneratePreviewsForColumn:(NSTableColumn*)col visibleFilteredRows:(NSRange)rows forceUpdate:(BOOL)force;
 - (void)regenerateAllPreviews;
-- (void)invalidateAllLabelPreviewImages;
 
 //for setting up the nstableviews
 - (id)labelsListDataSource;
